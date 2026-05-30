@@ -62,6 +62,19 @@ Maintenance artifact evidence files:
 - `live-ui/page-summary.json` and `live-ui/html/*.html` — fallback live UI observations.
 - `app-diff.txt` — optional application diff supplied by an upstream workflow.
 
+## Browser MCP
+
+This repo uses Playwright MCP so Claude Code can open and inspect the live app
+through a real browser during development sessions.
+
+- Open this repo in Claude Code.
+- When Claude Code asks, approve the `playwright` MCP server.
+- After approval, reload Claude Code once if the tools do not appear immediately.
+- You can then ask Claude Code to open the live app, find elements, or check
+  what a page looks like — for example:
+  _"Use the playwright MCP to open the live site and list all the buttons on
+  the login page."_
+
 ## Site credentials (demo only)
 
 - Email: `sarah.chen@restsuper.com.au`
