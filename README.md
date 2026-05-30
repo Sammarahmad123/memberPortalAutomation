@@ -1,34 +1,34 @@
 # REST Super Member Portal — Automated Tests
 
-Playwright test suite for the [super-member-portal-demo](../super-member-portal-demo) static site.
+Playwright E2E test suite for [REST Super Member Portal](https://sammarahmad123.github.io/super-member-portal-demo/).
 
-## Automated tests
+## Running the tests
 
-Install dependencies and run the full test suite:
+Against the deployed GitHub Pages site (default):
 
-```bash
-npm install && npx playwright install chromium && npm test
-```
+    npm install
+    npx playwright install chromium
+    npm test
 
-The webServer block in `playwright.config.js` automatically starts `http-server` serving `../super-member-portal-demo` on port 3000 before the tests run, so no manual server setup is needed.
+Against a local copy of the site for development:
 
-### Additional run modes
+    BASE_URL=http://localhost:3000/ npm test
 
-```bash
-npm run test:headed   # run with visible browser
-npm run test:ui       # open Playwright UI mode
-```
+The trailing slash on BASE_URL matters for relative path resolution.
+
+## Continuous Integration
+
+A GitHub Actions workflow (.github/workflows/test.yml) runs the
+full suite on every push to main, every pull request, and on
+manual dispatch. The Playwright HTML report is uploaded as an
+artifact on every run; traces are uploaded only on failure.
 
 ## Structure
 
 ```
 tests/
-  fixtures.js            # shared loggedInPage fixture
-  login.spec.js
-  dashboard.spec.js
-  contribution.spec.js
-  transactions.spec.js
-  member-details.spec.js
+  fixtures.js   # shared loggedInPage fixture
+  e2e.spec.js   # 5 end-to-end tests
 ```
 
 ## Site credentials (demo only)

@@ -3,7 +3,7 @@ const { test: baseTest } = require('@playwright/test');
 
 // 1. Invalid login shows inline error and stays on the login page
 baseTest('invalid login shows error and does not redirect', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('');
   await page.getByTestId('email-input').fill('wrong@example.com');
   await page.getByTestId('password-input').fill('wrongpassword');
   await page.getByTestId('login-btn').click();
@@ -21,7 +21,7 @@ test('valid login reaches dashboard with correct member info', async ({ loggedIn
 
 // 3. Contribution form accepts an amount and confirms submission
 test('contribution form submits and shows success message', async ({ loggedInPage }) => {
-  await loggedInPage.goto('/contribution.html');
+  await loggedInPage.goto('contribution.html');
   await loggedInPage.getByTestId('contribution-amount').fill('500');
   await loggedInPage.getByTestId('submit-contribution-btn').click();
   await expect(loggedInPage.locator('#contribution-success')).toBeVisible();
@@ -29,7 +29,7 @@ test('contribution form submits and shows success message', async ({ loggedInPag
 
 // 4. Transaction history table loads with data and valid statuses
 test('transaction history table shows rows with valid statuses', async ({ loggedInPage }) => {
-  await loggedInPage.goto('/transactions.html');
+  await loggedInPage.goto('transactions.html');
   await expect(loggedInPage.getByTestId('transactions-table')).toBeVisible();
   const rows = loggedInPage.getByTestId('transactions-table').locator('tbody tr');
   expect(await rows.count()).toBeGreaterThanOrEqual(6);
@@ -41,7 +41,7 @@ test('transaction history table shows rows with valid statuses', async ({ logged
 
 // 5. Member details form shows pre-filled data and confirms save
 test('member details shows correct data and saves successfully', async ({ loggedInPage }) => {
-  await loggedInPage.goto('/member-details.html');
+  await loggedInPage.goto('member-details.html');
   await expect(loggedInPage.getByTestId('member-name-input')).toHaveValue('Sarah Chen');
   await expect(loggedInPage.getByTestId('member-email-input')).toHaveValue('sarah.chen@restsuper.com.au');
   await loggedInPage.getByTestId('save-member-btn').click();
