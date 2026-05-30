@@ -35,7 +35,7 @@ const SOURCE_EXTENSIONS = new Set(['.js', '.mjs', '.cjs', '.ts', '.tsx']);
 const MAX_FILE_CHARS = 20_000;
 const MAX_TOTAL_CONTEXT_CHARS = 120_000;
 
-const MODEL = process.env.GEMINI_MODEL || 'gemini-2.0-flash';
+const MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash-lite';
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const BASE_URL = process.env.BASE_URL || '(not set)';
 
@@ -215,6 +215,53 @@ function normalizeManifest(candidate) {
   };
 }
 
+function isQuotaError(error) {
+  const status = error?.status || error?.code || error?.response?.status;
+  const message = String(error?.message || error || '').toLowerCase();
+
+  return status === 429 || message.includes('429') || message.includes('quota');
+}
+
+function buildFallbackManifest({ summary, reviewNotes, errorType }) {
+  return {
+    summary,
+    changeType: 'unknown',
+    confidence: 0,
+    canAutoFix: false,
+    affectedFiles: [],
+    suggestedChanges: [],
+    humanReviewRequired: true,
+    reviewNotes,
+    _error: {
+      type: errorType,
+    },
+  };
+}
+
+function attachMetadata(manifest, { failureLog, codeFiles }) {
+  return {
+    ...manifest,
+    _meta: {
+      generatedAt: new Date().toISOString(),
+      baseUrl: BASE_URL,
+      model: MODEL,
+      failureLogPath: path.relative(ROOT_DIR, FAILURE_LOG_PATH),
+      failureLogLength: failureLog.length,
+      contextFiles: codeFiles.map((file) => file.path),
+      phase: '3A-analysis-reporting-only',
+    },
+  };
+}
+
+function writeOutputs(manifest) {
+  fs.writeFileSync(MANIFEST_PATH, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
+  fs.writeFileSync(REPORT_PATH, renderReport(manifest), 'utf8');
+
+  console.log(`[ai-maintenance] Manifest written: ${MANIFEST_PATH}`);
+  console.log(`[ai-maintenance] Report written: ${REPORT_PATH}`);
+  console.log(`[ai-maintenance] Summary: ${manifest.summary}`);
+}
+
 function markdownEscapeTable(value) {
   return String(value ?? '').replace(/\|/g, '\\|').replace(/\n/g, '<br>');
 }
@@ -316,8 +363,24 @@ async function main() {
     });
     rawResponse = response.text;
   } catch (error) {
-    console.error(`[ai-maintenance] Gemini request failed: ${error.message}`);
-    process.exit(1);
+    if (!isQuotaError(error)) {
+      console.error(`[ai-maintenance] Gemini request failed: ${error.message}`);
+      process.exit(1);
+    }
+
+    console.error(`[ai-maintenance] Gemini quota error: ${error.message}`);
+    const manifest = attachMetadata(
+      buildFallbackManifest({
+        summary: 'AI maintenance analysis could not be completed because the Gemini API quota was exceeded.',
+        reviewNotes:
+          'Gemini returned a quota or rate-limit error, so no AI diagnosis was produced. Review the Playwright failure log in maintenance/evidence/playwright-output.txt and retry once quota is available.',
+        errorType: 'gemini-quota-exceeded',
+      }),
+      { failureLog, codeFiles },
+    );
+
+    writeOutputs(manifest);
+    return;
   }
 
   let parsed;
@@ -329,23 +392,8 @@ async function main() {
     process.exit(1);
   }
 
-  const manifest = normalizeManifest(parsed);
-  manifest._meta = {
-    generatedAt: new Date().toISOString(),
-    baseUrl: BASE_URL,
-    model: MODEL,
-    failureLogPath: path.relative(ROOT_DIR, FAILURE_LOG_PATH),
-    failureLogLength: failureLog.length,
-    contextFiles: codeFiles.map((file) => file.path),
-    phase: '3A-analysis-reporting-only',
-  };
-
-  fs.writeFileSync(MANIFEST_PATH, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
-  fs.writeFileSync(REPORT_PATH, renderReport(manifest), 'utf8');
-
-  console.log(`[ai-maintenance] Manifest written: ${MANIFEST_PATH}`);
-  console.log(`[ai-maintenance] Report written: ${REPORT_PATH}`);
-  console.log(`[ai-maintenance] Summary: ${manifest.summary}`);
+  const manifest = attachMetadata(normalizeManifest(parsed), { failureLog, codeFiles });
+  writeOutputs(manifest);
 }
 
 main().catch((error) => {

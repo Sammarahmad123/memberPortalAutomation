@@ -81,6 +81,7 @@ jobs:
         run: npm run ai:maintenance
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_MODEL: gemini-2.5-flash-lite
           BASE_URL: ${{ github.event.client_payload.app_url || 'https://sammarahmad123.github.io/super-member-portal-demo/' }}
 
       - name: Upload maintenance artifacts
