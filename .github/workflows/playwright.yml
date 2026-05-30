@@ -10,20 +10,31 @@ on:
   pull_request:
     branches: [main]
 
+# pages: write + id-token: write are needed by the deploy-report job.
+# They are harmless on PR runs because deploy-report is skipped entirely.
 permissions:
   contents: read
   pages: write
   id-token: write
 
+# PRs:            cancel the old run for the same PR on each new push.
+# Pages deploys:  never cancel in-flight - a partial deploy leaves Pages broken.
 concurrency:
   group: ${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || 'pages' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  # Job 1: test
+  # Runs on every trigger.
+  # Intentionally has no environment block. PR runs must never be treated as
+  # deployment attempts and must never touch the github-pages environment.
   test:
     name: Run Playwright tests
     runs-on: ubuntu-latest
     timeout-minutes: 20
+
+    # Export the raw test outcome so deploy-report can re-raise dispatch/manual
+    # failures after reports and maintenance artifacts are safely published.
     outputs:
       tests-outcome: ${{ steps.dispatch-tests.outputs.tests-outcome || steps.pr-tests.outcome }}
 
@@ -76,6 +87,7 @@ jobs:
 
       - name: Run Gemini maintenance analysis
         if: github.event_name != 'pull_request' && steps.dispatch-tests.outputs.tests-outcome == 'failure'
+        continue-on-error: true
         run: npm run ai:maintenance
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
@@ -92,7 +104,10 @@ jobs:
             maintenance/reports/
           retention-days: 14
 
-      - name: Upload Playwright report artifact
+      # Always upload the report as a plain artifact.
+      # PR runs: directly downloadable from the run summary.
+      # Dispatch/manual: picked up by the deploy-report job below.
+      - name: Upload playwright-report artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -100,6 +115,7 @@ jobs:
           path: playwright-report/
           retention-days: 14
 
+  # Job 2: deploy-report
   # Runs only for dispatch / manual, never for pull_request.
   # This is the only place that references the github-pages environment, so PR
   # runs are completely isolated from it.
