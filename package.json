@@ -6,7 +6,12 @@
     "test": "playwright test",
     "test:headed": "playwright test --headed",
     "test:ui": "playwright test --ui",
-    "ai:maintenance": "node agent/ai-maintenance-agent.mjs"
+    "collect:failure-targets": "node agent/collect-failure-targets.mjs",
+    "collect:trace-summary": "node agent/collect-trace-summary.mjs",
+    "collect:code-context": "node agent/collect-code-context.mjs",
+    "collect:live-ui": "node agent/collect-live-ui-evidence.mjs",
+    "ai:maintenance": "node agent/ai-maintenance-agent.mjs",
+    "ai:maintenance:dry-run": "node agent/ai-maintenance-agent.mjs --dry-run --fixture maintenance/fixtures/sample-failure"
   },
   "devDependencies": {
     "@playwright/test": "^1.48.0",

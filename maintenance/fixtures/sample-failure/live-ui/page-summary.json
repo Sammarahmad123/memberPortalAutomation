@@ -1,0 +1,31 @@
+{
+  "schemaVersion": "3A-plus-live-ui-v1",
+  "generatedAt": "2026-05-30T00:00:00.000Z",
+  "available": true,
+  "reason": null,
+  "baseUrl": "https://example.test/",
+  "pages": [
+    {
+      "available": true,
+      "target": "/dashboard.html",
+      "source": "trace-summary",
+      "url": "https://example.test/dashboard.html",
+      "currentUrl": "https://example.test/dashboard.html",
+      "title": "Member Dashboard",
+      "visibleTextSummary": "Welcome back, Sarah Chen Current balance $142,580.33",
+      "buttons": [],
+      "inputs": [],
+      "links": [
+        {
+          "text": "Transactions",
+          "href": "https://example.test/transactions.html"
+        }
+      ],
+      "selects": [],
+      "dataTestIds": [
+        "member-dashboard"
+      ],
+      "htmlSnapshot": "<html><body><h1>Welcome back, Sarah Chen</h1><span id=\"current-balance\">$142,580.33</span></body></html>"
+    }
+  ]
+}

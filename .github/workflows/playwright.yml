@@ -64,7 +64,8 @@ jobs:
         shell: bash
         run: |
           set +e
-          npx playwright test 2>&1 | tee maintenance/evidence/playwright-output.txt
+          PLAYWRIGHT_JSON_OUTPUT_NAME=maintenance/evidence/playwright-report.json \
+            npx playwright test --reporter=json,html,line 2>&1 | tee maintenance/evidence/playwright-output.txt
           status=${PIPESTATUS[0]}
           if [ "${status}" -eq 0 ]; then
             echo "tests-outcome=success" >> "${GITHUB_OUTPUT}"
@@ -75,14 +76,25 @@ jobs:
         env:
           BASE_URL: ${{ github.event.client_payload.app_url || 'https://sammarahmad123.github.io/super-member-portal-demo/' }}
 
-      - name: Run Gemini maintenance analysis
-        if: steps.tests.outputs.tests-outcome == 'failure'
+      - name: Collect structured maintenance evidence
+        if: always()
+        run: |
+          npm run collect:failure-targets
+          npm run collect:trace-summary
+          npm run collect:code-context
+          npm run collect:live-ui
+        env:
+          BASE_URL: ${{ github.event.client_payload.app_url || 'https://sammarahmad123.github.io/super-member-portal-demo/' }}
+
+      - name: Run AI maintenance analysis
+        if: always()
         continue-on-error: true
         run: npm run ai:maintenance
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_MODEL: gemini-2.5-flash-lite
           BASE_URL: ${{ github.event.client_payload.app_url || 'https://sammarahmad123.github.io/super-member-portal-demo/' }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
 
       - name: Upload maintenance artifacts
         if: always() && steps.tests.outputs.tests-outcome == 'failure'

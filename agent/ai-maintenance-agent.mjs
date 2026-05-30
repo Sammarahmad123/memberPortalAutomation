@@ -1,402 +1,571 @@
 /**
- * Phase 3A - Gemini-powered Playwright failure analysis.
+ * Phase 3A+ - evidence-driven Gemini Playwright maintenance analysis.
  *
- * This phase is analysis/reporting only. It does not edit tests, create
- * branches, create PRs, or deploy anything.
+ * Analysis/reporting only. This script never patches tests, creates branches,
+ * creates PRs, or deploys anything.
  */
 
 import { GoogleGenAI } from '@google/genai';
-import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const ROOT_DIR = path.resolve(__dirname, '..');
-
-const EVIDENCE_DIR = path.join(ROOT_DIR, 'maintenance', 'evidence');
-const MANIFEST_DIR = path.join(ROOT_DIR, 'maintenance', 'manifests');
-const REPORTS_DIR = path.join(ROOT_DIR, 'maintenance', 'reports');
-
-const FAILURE_LOG_PATH = path.join(EVIDENCE_DIR, 'playwright-output.txt');
-const MANIFEST_PATH = path.join(MANIFEST_DIR, 'latest-change-manifest.json');
-const REPORT_PATH = path.join(REPORTS_DIR, 'latest-maintenance-report.md');
-
-const CONTEXT_DIRS = [
-  'tests',
-  'pages',
-  'page-objects',
-  'pageObjects',
-  'src/pages',
-  'src/page-objects',
-  'src/pageObjects',
-];
-
-const SOURCE_EXTENSIONS = new Set(['.js', '.mjs', '.cjs', '.ts', '.tsx']);
-const MAX_FILE_CHARS = 20_000;
-const MAX_TOTAL_CONTEXT_CHARS = 120_000;
+import {
+  DEFAULT_EVIDENCE_DIR,
+  LOCKED_SCHEMA_VERSION,
+  MANIFEST_PATH,
+  REPORT_PATH,
+  buildNoFailuresManifest,
+  existingEvidenceFile,
+  getEvidenceDir,
+  normalizeManifest,
+  parseArgs,
+  readJson,
+  readText,
+  safeJsonForPrompt,
+  truncateEnd,
+  truncateMiddle,
+  lastLines,
+  writeJson,
+  writeText,
+} from './maintenance-utils.mjs';
 
 const MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash-lite';
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const BASE_URL = process.env.BASE_URL || '(not set)';
+const EVENT_NAME = process.env.GITHUB_EVENT_NAME || null;
 
-if (!GEMINI_API_KEY) {
-  console.error('[ai-maintenance] GEMINI_API_KEY is not set.');
-  process.exit(1);
-}
+const args = parseArgs();
+const evidenceDir = getEvidenceDir(args);
 
-function ensureDir(dirPath) {
-  fs.mkdirSync(dirPath, { recursive: true });
-}
-
-function readTextFile(filePath) {
-  try {
-    return fs.readFileSync(filePath, 'utf8');
-  } catch {
-    return null;
-  }
-}
-
-function truncate(value, maxChars) {
-  if (!value || value.length <= maxChars) {
-    return value || '';
-  }
-
-  return `${value.slice(0, maxChars)}\n\n[truncated: original length ${value.length} chars]`;
-}
-
-function walkSourceFiles(dirPath) {
-  if (!fs.existsSync(dirPath)) {
-    return [];
-  }
-
-  const files = [];
-  const entries = fs.readdirSync(dirPath, { withFileTypes: true });
-
-  for (const entry of entries) {
-    const fullPath = path.join(dirPath, entry.name);
-
-    if (entry.isDirectory()) {
-      if (['node_modules', '.git', 'test-results', 'playwright-report'].includes(entry.name)) {
-        continue;
-      }
-      files.push(...walkSourceFiles(fullPath));
-      continue;
-    }
-
-    if (entry.isFile() && SOURCE_EXTENSIONS.has(path.extname(entry.name))) {
-      files.push(fullPath);
-    }
-  }
-
-  return files;
-}
-
-function collectCodeContext() {
-  const files = [];
-  const seen = new Set();
-  let totalChars = 0;
-
-  for (const relativeDir of CONTEXT_DIRS) {
-    const absoluteDir = path.join(ROOT_DIR, relativeDir);
-
-    for (const filePath of walkSourceFiles(absoluteDir)) {
-      if (seen.has(filePath) || totalChars >= MAX_TOTAL_CONTEXT_CHARS) {
-        continue;
-      }
-
-      const source = readTextFile(filePath);
-      if (!source) {
-        continue;
-      }
-
-      const truncatedSource = truncate(source, MAX_FILE_CHARS);
-      totalChars += truncatedSource.length;
-      seen.add(filePath);
-      files.push({
-        path: path.relative(ROOT_DIR, filePath),
-        source: truncatedSource,
-      });
-    }
-  }
-
-  return files;
-}
-
-function formatCodeContext(files) {
-  if (!files.length) {
-    return '(no test or page object source files found)';
-  }
-
-  return files
-    .map((file) => {
-      const extension = path.extname(file.path).replace('.', '') || 'text';
-      return `### ${file.path}\n\`\`\`${extension}\n${file.source}\n\`\`\``;
-    })
-    .join('\n\n');
-}
-
-function buildPrompt({ failureLog, codeContext }) {
-  return `
-You are an expert Playwright automation maintenance analyst.
-
-The automation suite failed against this application URL:
-BASE_URL: ${BASE_URL}
-
-This is Phase 3A. You must analyse and report only. Do not propose direct file patches, branch operations, pull requests, deployments, or commands that mutate the repository.
-
-## Playwright failure log
-\`\`\`text
-${failureLog}
-\`\`\`
-
-## Current automation code context
-${codeContext}
-
-## Task
-Infer the most likely application-side change or test-maintenance issue from the evidence.
-
-Return ONLY a valid JSON object with exactly these top-level fields:
-{
-  "summary": "one sentence describing what likely failed and why",
-  "changeType": "selector-change | url-change | content-change | timing-issue | network-error | auth-failure | test-data-change | unknown",
-  "confidence": 0,
-  "canAutoFix": false,
-  "affectedFiles": ["relative/path/to/file.js"],
-  "suggestedChanges": [
-    {
-      "file": "relative/path/to/file.js",
-      "description": "what should change and why",
-      "currentValue": "current selector/text/url/value if identifiable",
-      "suggestedValue": "new selector/text/url/value if identifiable"
-    }
-  ],
-  "humanReviewRequired": true,
-  "reviewNotes": "caveats, risks, and what a human should verify"
-}
-
-Rules:
-- Return JSON only. No markdown fences. No prose outside JSON.
-- confidence must be a number from 0 to 100.
-- canAutoFix may be true only if the evidence identifies a narrow, safe maintenance update.
-- affectedFiles must include only automation files likely to need maintenance.
-- suggestedChanges can be empty when the fix is unclear.
-- Do not invent files that are not present in the provided code context.
-`.trim();
-}
-
-function cleanJsonResponse(rawText) {
-  return rawText
-    .replace(/^```json\s*/i, '')
-    .replace(/^```\s*/i, '')
-    .replace(/```\s*$/i, '')
-    .trim();
-}
-
-function normalizeManifest(candidate) {
-  const manifest = candidate && typeof candidate === 'object' ? candidate : {};
-  const confidence = Number(manifest.confidence);
-
-  return {
-    summary: typeof manifest.summary === 'string' ? manifest.summary : 'Gemini did not provide a summary.',
-    changeType: typeof manifest.changeType === 'string' ? manifest.changeType : 'unknown',
-    confidence: Number.isFinite(confidence) ? Math.max(0, Math.min(100, confidence)) : 0,
-    canAutoFix: Boolean(manifest.canAutoFix),
-    affectedFiles: Array.isArray(manifest.affectedFiles) ? manifest.affectedFiles.filter((item) => typeof item === 'string') : [],
-    suggestedChanges: Array.isArray(manifest.suggestedChanges)
-      ? manifest.suggestedChanges.map((change) => ({
-          file: typeof change?.file === 'string' ? change.file : '',
-          description: typeof change?.description === 'string' ? change.description : '',
-          currentValue: typeof change?.currentValue === 'string' ? change.currentValue : '',
-          suggestedValue: typeof change?.suggestedValue === 'string' ? change.suggestedValue : '',
-        }))
-      : [],
-    humanReviewRequired: Boolean(manifest.humanReviewRequired),
-    reviewNotes: typeof manifest.reviewNotes === 'string' ? manifest.reviewNotes : '',
-  };
+function evidenceFile(relativePath) {
+  return path.join(evidenceDir, relativePath);
 }
 
 function isQuotaError(error) {
   const status = error?.status || error?.code || error?.response?.status;
   const message = String(error?.message || error || '').toLowerCase();
-
   return status === 429 || message.includes('429') || message.includes('quota');
 }
 
-function buildFallbackManifest({ summary, reviewNotes, errorType }) {
+function evidenceFiles() {
   return {
-    summary,
-    changeType: 'unknown',
-    confidence: 0,
-    canAutoFix: false,
-    affectedFiles: [],
-    suggestedChanges: [],
-    humanReviewRequired: true,
-    reviewNotes,
-    _error: {
-      type: errorType,
-    },
+    playwrightJson: existingEvidenceFile(evidenceDir, 'playwright-report.json'),
+    playwrightOutput: existingEvidenceFile(evidenceDir, 'playwright-output.txt'),
+    failureTargets: existingEvidenceFile(evidenceDir, 'failure-targets.json'),
+    traceSummary: existingEvidenceFile(evidenceDir, 'trace-summary.json'),
+    liveUiSummary: existingEvidenceFile(evidenceDir, 'live-ui/page-summary.json'),
+    appDiff: existingEvidenceFile(evidenceDir, 'app-diff.txt'),
+    codeContext: existingEvidenceFile(evidenceDir, 'code-context-summary.json'),
   };
 }
 
-function attachMetadata(manifest, { failureLog, codeFiles }) {
+function runContext(overrides = {}) {
+  const traceSummary = readJson(evidenceFile('trace-summary.json'));
+  const liveUiSummary = readJson(evidenceFile('live-ui/page-summary.json'));
   return {
-    ...manifest,
-    _meta: {
-      generatedAt: new Date().toISOString(),
-      baseUrl: BASE_URL,
-      model: MODEL,
-      failureLogPath: path.relative(ROOT_DIR, FAILURE_LOG_PATH),
-      failureLogLength: failureLog.length,
-      contextFiles: codeFiles.map((file) => file.path),
-      phase: '3A-analysis-reporting-only',
-    },
+    baseUrl: BASE_URL,
+    eventName: EVENT_NAME,
+    model: MODEL,
+    generatedAt: new Date().toISOString(),
+    appDiffAvailable: Boolean(existingEvidenceFile(evidenceDir, 'app-diff.txt')),
+    traceAvailable: Boolean(traceSummary?.available),
+    liveUiEvidenceAvailable: Boolean(liveUiSummary?.available),
+    playwrightJsonAvailable: Boolean(existingEvidenceFile(evidenceDir, 'playwright-report.json')),
+    truncationApplied: false,
+    ...overrides,
   };
 }
 
-function writeOutputs(manifest) {
-  fs.writeFileSync(MANIFEST_PATH, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
-  fs.writeFileSync(REPORT_PATH, renderReport(manifest), 'utf8');
+function defaults(overrides = {}) {
+  return {
+    baseUrl: BASE_URL,
+    eventName: EVENT_NAME,
+    model: MODEL,
+    runContext: runContext(overrides.runContext || {}),
+    evidenceFiles: evidenceFiles(),
+  };
+}
 
+function buildFlakyFinding(target, index) {
+  return {
+    id: `flaky-${index + 1}`,
+    testTitle: target.testTitle || '',
+    specFile: target.specFile || '',
+    line: target.line || 0,
+    failureType: 'flaky-retry-recovered',
+    expected: target.expected || null,
+    actual: target.actual || null,
+    observedInLiveUi: false,
+    relatedUrl: null,
+    affectedAutomationFiles: target.specFile ? [target.specFile] : [],
+    likelyCause: 'The test failed on an earlier retry but passed on a later attempt.',
+    classification: 'environment-issue',
+    confidence: 1.0,
+    safeToAutoFixLater: false,
+    classificationRationale: [
+      {
+        evidenceFile: evidenceFiles().failureTargets || 'maintenance/evidence/failure-targets.json',
+        fact: `Retry attempts recovered for "${target.testTitle || 'unknown test'}".`,
+        supports: 'flaky-retry-recovered environment-issue classification',
+      },
+    ],
+    suggestedNextStep: 'Monitor recurrence and inspect environment stability before considering test maintenance.',
+  };
+}
+
+function writeManifestAndReport(manifest) {
+  const normalized = normalizeManifest(manifest, defaults({ runContext: manifest.runContext || {} }));
+  writeJson(MANIFEST_PATH, normalized);
+  writeText(REPORT_PATH, renderReport(normalized));
   console.log(`[ai-maintenance] Manifest written: ${MANIFEST_PATH}`);
   console.log(`[ai-maintenance] Report written: ${REPORT_PATH}`);
-  console.log(`[ai-maintenance] Summary: ${manifest.summary}`);
-}
-
-function markdownEscapeTable(value) {
-  return String(value ?? '').replace(/\|/g, '\\|').replace(/\n/g, '<br>');
+  console.log(`[ai-maintenance] Summary: ${normalized.overallSummary}`);
+  return normalized;
 }
 
 function renderReport(manifest) {
-  const affectedFiles = manifest.affectedFiles.length
-    ? manifest.affectedFiles.map((file) => `- \`${file}\``).join('\n')
-    : '_None identified._';
+  if (manifest.overallClassification === 'no-failures') {
+    return `# AI Automation Maintenance Report\n\nNo failed tests detected in this run.\n`;
+  }
 
-  const suggestedChanges = manifest.suggestedChanges.length
-    ? manifest.suggestedChanges
-        .map((change) => {
-          const lines = [
-            `### ${change.file || 'Unspecified file'}`,
-            '',
-            change.description || '_No description provided._',
-          ];
+  const findings = manifest.findings.length
+    ? manifest.findings
+        .map((finding) => {
+          const rationale = finding.classificationRationale.length
+            ? finding.classificationRationale
+                .map((item) => `- ${item.evidenceFile}: ${item.fact} (${item.supports})`)
+                .join('\n')
+            : '- No rationale supplied.';
+          return `## ${finding.id}: ${finding.testTitle || 'Unknown test'}
 
-          if (change.currentValue) {
-            lines.push('', `- Current value: \`${change.currentValue}\``);
-          }
+- Classification: ${finding.classification}
+- Failure type: ${finding.failureType}
+- Confidence: ${finding.confidence}
+- Safe to auto-fix later: ${finding.safeToAutoFixLater ? 'yes' : 'no'}
+- Spec: ${finding.specFile}:${finding.line}
+- Likely cause: ${finding.likelyCause}
+- Suggested next step: ${finding.suggestedNextStep}
 
-          if (change.suggestedValue) {
-            lines.push(`- Suggested value: \`${change.suggestedValue}\``);
-          }
+### Rationale
 
-          return lines.join('\n');
+${rationale}`;
         })
         .join('\n\n')
-    : '_No specific code changes suggested._';
+    : '_No findings._';
 
   return `# AI Automation Maintenance Report
 
-Generated: ${manifest._meta.generatedAt}
-Model: \`${manifest._meta.model}\`
-BASE_URL: ${manifest._meta.baseUrl}
+Generated: ${manifest.runContext.generatedAt}
+Model: \`${manifest.runContext.model}\`
+BASE_URL: ${manifest.runContext.baseUrl}
 
-This Phase 3A report is analysis only. No test files were patched and no pull request was created.
+This Phase 3A+ report is analysis only. No test files were patched and no pull request was created.
 
-## Summary
+## Overall Summary
 
-${manifest.summary}
+${manifest.overallSummary}
 
 ## Diagnosis
 
 | Field | Value |
 | --- | --- |
-| Change type | \`${markdownEscapeTable(manifest.changeType)}\` |
-| Confidence | ${manifest.confidence}/100 |
-| Can auto-fix | ${manifest.canAutoFix ? 'Yes' : 'No'} |
+| Classification | \`${manifest.overallClassification}\` |
+| Confidence | ${manifest.confidence} |
 | Human review required | ${manifest.humanReviewRequired ? 'Yes' : 'No'} |
+| Can proceed to patch planning | ${manifest.canProceedToPatchPlanning ? 'Yes' : 'No'} |
+| Truncation applied | ${manifest.runContext.truncationApplied ? 'Yes' : 'No'} |
 
-## Affected files
+${findings}
 
-${affectedFiles}
+## Review Notes
 
-## Suggested changes
-
-${suggestedChanges}
-
-## Review notes
-
-${manifest.reviewNotes || '_None provided._'}
+${manifest.reviewNotes || '_None._'}
 `;
 }
 
-async function main() {
-  ensureDir(EVIDENCE_DIR);
-  ensureDir(MANIFEST_DIR);
-  ensureDir(REPORTS_DIR);
+function readEvidenceJson(relativePath) {
+  return readJson(evidenceFile(relativePath));
+}
 
-  console.log('[ai-maintenance] Phase 3A Gemini analysis starting.');
+function preparePromptEvidence() {
+  const truncations = [];
+  const playwrightJson = readEvidenceJson('playwright-report.json');
+  const failureTargets = readEvidenceJson('failure-targets.json');
+  const traceSummary = readEvidenceJson('trace-summary.json');
+  const codeContext = readEvidenceJson('code-context-summary.json');
+  const liveUiSummary = readEvidenceJson('live-ui/page-summary.json');
+  const appDiff = readText(evidenceFile('app-diff.txt'));
+  const output = readText(evidenceFile('playwright-output.txt'));
+
+  const preparedTrace = traceSummary
+    ? {
+        ...traceSummary,
+        traces: (traceSummary.traces || []).map((trace) => {
+          const actions = trace.actionsAttempted || [];
+          if (actions.length > 200) {
+            truncations.push({
+              file: 'maintenance/evidence/trace-summary.json',
+              originalSize: actions.length,
+              truncatedSize: 200,
+              reason: 'actionsAttempted limited to 200 events per trace',
+            });
+          }
+          return {
+            ...trace,
+            actionsAttempted: actions.slice(0, 200),
+          };
+        }),
+      }
+    : null;
+
+  const files = codeContext?.files || [];
+  if (files.length > 50) {
+    truncations.push({
+      file: 'maintenance/evidence/code-context-summary.json',
+      originalSize: files.length,
+      truncatedSize: 50,
+      reason: 'code context limited to 50 files',
+    });
+  }
+  const preparedCodeContext = codeContext ? { ...codeContext, files: files.slice(0, 50) } : null;
+
+  const livePages = liveUiSummary?.pages || [];
+  const preparedLivePages = livePages.slice(0, 10).map((page) => {
+    if (!page.htmlSnapshot) return page;
+    const truncated = truncateEnd(page.htmlSnapshot, 5 * 1024);
+    if (truncated.truncated) {
+      truncations.push({
+        file: page.htmlFile || 'maintenance/evidence/live-ui/page-summary.json',
+        originalSize: truncated.originalSize,
+        truncatedSize: truncated.truncatedSize,
+        reason: 'live UI HTML snapshot limited to 5KB per page',
+      });
+    }
+    return { ...page, htmlSnapshot: truncated.text };
+  });
+  if (livePages.length > 10) {
+    truncations.push({
+      file: 'maintenance/evidence/live-ui/page-summary.json',
+      originalSize: livePages.length,
+      truncatedSize: 10,
+      reason: 'live UI pages limited to 10',
+    });
+  }
+  const preparedLiveUi = liveUiSummary ? { ...liveUiSummary, pages: preparedLivePages } : null;
+
+  let preparedAppDiff = null;
+  if (appDiff !== null) {
+    const truncated = truncateMiddle(appDiff, 200 * 1024);
+    if (truncated.truncated) {
+      truncations.push({
+        file: 'maintenance/evidence/app-diff.txt',
+        originalSize: truncated.originalSize,
+        truncatedSize: truncated.truncatedSize,
+        reason: 'app diff limited to 200KB with middle truncation',
+      });
+    }
+    preparedAppDiff = truncated.text;
+  }
+
+  let preparedOutput = null;
+  if (output !== null) {
+    const truncated = lastLines(output, 500);
+    if (truncated.truncated) {
+      truncations.push({
+        file: 'maintenance/evidence/playwright-output.txt',
+        originalSize: truncated.originalSize,
+        truncatedSize: truncated.truncatedSize,
+        reason: 'Playwright output limited to last 500 lines',
+      });
+    }
+    preparedOutput = truncated.text;
+  }
+
+  return {
+    evidence: {
+      playwrightJson,
+      failureTargets,
+      traceSummary: preparedTrace,
+      codeContext: preparedCodeContext,
+      liveUiSummary: preparedLiveUi,
+      appDiff: preparedAppDiff,
+      playwrightOutput: preparedOutput,
+    },
+    truncations,
+  };
+}
+
+function buildPrompt(evidence) {
+  return `
+You are an expert Playwright automation maintenance analyst. This is Phase 3A+ analysis/reporting only. Do not patch tests, create branches, create PRs, deploy anything, or rubber-stamp current app behaviour as correct.
+
+Locked schema version: ${LOCKED_SCHEMA_VERSION}
+
+Evidence files:
+
+## maintenance/evidence/playwright-report.json
+${safeJsonForPrompt(evidence.playwrightJson)}
+
+## maintenance/evidence/failure-targets.json
+${safeJsonForPrompt(evidence.failureTargets)}
+
+## maintenance/evidence/trace-summary.json
+${safeJsonForPrompt(evidence.traceSummary)}
+
+## maintenance/evidence/code-context-summary.json
+${safeJsonForPrompt(evidence.codeContext)}
+
+## maintenance/evidence/live-ui/page-summary.json
+${safeJsonForPrompt(evidence.liveUiSummary)}
+
+## maintenance/evidence/app-diff.txt
+${evidence.appDiff ?? '(unavailable)'}
+
+## maintenance/evidence/playwright-output.txt
+${evidence.playwrightOutput ?? '(unavailable)'}
+
+Classification rules:
+- Missing getByTestId does NOT automatically mean safe selector update.
+- A selector rename is only likely test-maintenance if evidence shows behaviour, label, role, and outcome were preserved.
+- Assertion text/value changes may be a valid app change or an app regression. Use app diff and live evidence before deciding.
+- Timeout is timing-issue only if evidence shows the element exists but was slow or unavailable.
+- If current app behaviour changed and no diff confirms it was intentional, classify as insufficient-evidence or app-regression, never as test-maintenance.
+- Never update tests just to match whatever the app currently shows.
+
+Step 1
+Summarise app-diff.txt in up to 3 bullets. If unavailable, state:
+"app diff is unavailable; reasoning must rely on live UI evidence
+and trace evidence."
+
+Step 2
+For each failed test in failure-targets.json, state the single most
+likely hypothesis in one sentence.
+
+Step 3
+For each hypothesis, populate the classificationRationale array on
+the corresponding finding with at least one entry. Each entry must
+have:
+  evidenceFile (path),
+  fact (verbatim or paraphrased fact from that file),
+  supports (which hypothesis or classification this fact supports
+            or refutes).
+Any finding without at least one rationale entry MUST be classified
+as insufficient-evidence.
+
+Step 4
+Classify each finding using the locked enum:
+test-maintenance, app-regression, environment-issue,
+insufficient-evidence. If evidence is not strong enough, classify
+as insufficient-evidence. Do not guess.
+
+Step 5
+Only set humanReviewRequired = false if:
+- every finding classification is test-maintenance
+- every finding confidence is >= 0.8
+- behaviour, text, role, and outcome appear preserved in evidence
+
+Step 6
+Return JSON only using the locked schema. No markdown. No prose
+outside JSON.
+`.trim();
+}
+
+function dryRunResponse(preparedEvidence, truncations) {
+  const target =
+    preparedEvidence.failureTargets?.failedTests?.[0] ||
+    preparedEvidence.failureTargets?.allTargets?.find((item) => !item.retryRecovered) ||
+    {};
+  return {
+    schemaVersion: LOCKED_SCHEMA_VERSION,
+    runContext: runContext({ truncationApplied: true }),
+    overallSummary: 'Dry-run analysis identified an example selector-related failure requiring human review.',
+    overallClassification: 'insufficient-evidence',
+    confidence: 0.42,
+    humanReviewRequired: true,
+    canProceedToPatchPlanning: false,
+    findings: [
+      {
+        id: 'finding-1',
+        testTitle: target.testTitle || 'valid login reaches dashboard with correct member info',
+        specFile: target.specFile || 'tests/e2e.spec.js',
+        line: target.line || 15,
+        failureType: 'selector-missing',
+        expected: target.expected || 'Welcome, Sarah Chen',
+        actual: target.actual || null,
+        observedInLiveUi: true,
+        relatedUrl: '/dashboard.html',
+        affectedAutomationFiles: ['tests/e2e.spec.js', 'tests/fixtures.js'],
+        likelyCause: 'The dry-run fixture suggests a locator or dashboard heading changed, but intent is not proven.',
+        classification: 'insufficient-evidence',
+        confidence: 0.42,
+        safeToAutoFixLater: false,
+        classificationRationale: [
+          {
+            evidenceFile: 'maintenance/evidence/failure-targets.json',
+            fact: 'The synthetic failure target reports a missing or mismatched dashboard heading assertion.',
+            supports: 'supports a test failure, but not enough evidence to classify it as safe test maintenance',
+          },
+        ],
+        suggestedNextStep: 'Review app diff and trace snapshots before planning any patch.',
+      },
+    ],
+    evidenceFiles: evidenceFiles(),
+    reviewNotes:
+      'Dry-run stub response. This exercises schema validation, reporting, and truncation handling without calling Gemini. Truncation is intentionally flagged in dry-run mode.',
+  };
+}
+
+function parseGeminiJson(responseText) {
+  let raw = String(responseText || '').trim();
+  raw = raw.replace(/^```json\s*/i, '').replace(/```$/i, '').trim();
+  return JSON.parse(raw);
+}
+
+function appendTruncationNotes(reviewNotes, truncations) {
+  if (!truncations.length) return reviewNotes || '';
+
+  const lines = truncations.map(
+    (item) =>
+      `- ${item.file}: ${item.reason}; original=${item.originalSize}, truncated=${item.truncatedSize}`,
+  );
+  return `${reviewNotes || ''}${reviewNotes ? '\n\n' : ''}Truncation applied:\n${lines.join('\n')}`;
+}
+
+function fallbackManifest({ summary, classification = 'insufficient-evidence', reviewNotes, truncations = [] }) {
+  return normalizeManifest(
+    {
+      runContext: runContext({ truncationApplied: truncations.length > 0 }),
+      overallSummary: summary,
+      overallClassification: classification,
+      confidence: 0.0,
+      humanReviewRequired: true,
+      canProceedToPatchPlanning: false,
+      findings: [],
+      evidenceFiles: evidenceFiles(),
+      reviewNotes: appendTruncationNotes(reviewNotes, truncations),
+    },
+    defaults({ runContext: { truncationApplied: truncations.length > 0 } }),
+  );
+}
+
+async function callGemini(prompt) {
+  if (!GEMINI_API_KEY) {
+    throw new Error('GEMINI_API_KEY is not set.');
+  }
+  const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+  const response = await ai.models.generateContent({
+    model: MODEL,
+    contents: prompt,
+    config: {
+      responseMimeType: 'application/json',
+    },
+  });
+  return response.text;
+}
+
+async function main() {
+  console.log('[ai-maintenance] Phase 3A+ analysis starting.');
+  console.log(`[ai-maintenance] Evidence: ${evidenceDir === DEFAULT_EVIDENCE_DIR ? 'maintenance/evidence' : evidenceDir}`);
   console.log(`[ai-maintenance] BASE_URL: ${BASE_URL}`);
   console.log(`[ai-maintenance] Model: ${MODEL}`);
 
-  const failureLog = readTextFile(FAILURE_LOG_PATH);
-  if (!failureLog) {
-    console.error(`[ai-maintenance] Missing Playwright failure log: ${FAILURE_LOG_PATH}`);
-    process.exit(1);
-  }
+  const failureTargets = readEvidenceJson('failure-targets.json');
+  const failedTests = failureTargets?.failedTests || [];
+  const flakyRecoveredTests = failureTargets?.flakyRecoveredTests || [];
 
-  const codeFiles = collectCodeContext();
-  const codeContext = formatCodeContext(codeFiles);
-  const prompt = buildPrompt({
-    failureLog: truncate(failureLog, MAX_TOTAL_CONTEXT_CHARS),
-    codeContext,
-  });
-
-  const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
-  let rawResponse;
-
-  try {
-    const response = await ai.models.generateContent({
-      model: MODEL,
-      contents: prompt,
-      config: {
-        responseMimeType: 'application/json',
-      },
-    });
-    rawResponse = response.text;
-  } catch (error) {
-    if (!isQuotaError(error)) {
-      console.error(`[ai-maintenance] Gemini request failed: ${error.message}`);
-      process.exit(1);
-    }
-
-    console.error(`[ai-maintenance] Gemini quota error: ${error.message}`);
-    const manifest = attachMetadata(
-      buildFallbackManifest({
-        summary: 'AI maintenance analysis could not be completed because the Gemini API quota was exceeded.',
-        reviewNotes:
-          'Gemini returned a quota or rate-limit error, so no AI diagnosis was produced. Review the Playwright failure log in maintenance/evidence/playwright-output.txt and retry once quota is available.',
-        errorType: 'gemini-quota-exceeded',
-      }),
-      { failureLog, codeFiles },
-    );
-
-    writeOutputs(manifest);
+  if (!failedTests.length && !flakyRecoveredTests.length) {
+    writeManifestAndReport(buildNoFailuresManifest(defaults()));
     return;
   }
 
-  let parsed;
-  try {
-    parsed = JSON.parse(cleanJsonResponse(rawResponse));
-  } catch (error) {
-    console.error(`[ai-maintenance] Gemini did not return parseable JSON: ${error.message}`);
-    console.error(rawResponse);
-    process.exit(1);
+  if (!failedTests.length && flakyRecoveredTests.length) {
+    writeManifestAndReport(
+      normalizeManifest(
+        {
+          runContext: runContext(),
+          overallSummary: 'Only retry-recovered flaky failures were detected; no test maintenance analysis was run.',
+          overallClassification: 'environment-issue',
+          confidence: 1.0,
+          humanReviewRequired: false,
+          canProceedToPatchPlanning: false,
+          findings: flakyRecoveredTests.map(buildFlakyFinding),
+          evidenceFiles: evidenceFiles(),
+          reviewNotes: 'Gemini analysis was skipped because all failures recovered on retry.',
+        },
+        defaults(),
+      ),
+    );
+    return;
   }
 
-  const manifest = attachMetadata(normalizeManifest(parsed), { failureLog, codeFiles });
-  writeOutputs(manifest);
+  const { evidence, truncations } = preparePromptEvidence();
+  const prompt = buildPrompt(evidence);
+
+  let parsed;
+  if (args.dryRun) {
+    parsed = dryRunResponse(evidence, truncations);
+  } else {
+    let rawResponse = '';
+    try {
+      rawResponse = await callGemini(prompt);
+      parsed = parseGeminiJson(rawResponse);
+    } catch (error) {
+      if (isQuotaError(error)) {
+        writeManifestAndReport(
+          fallbackManifest({
+            summary: 'AI maintenance analysis could not be completed because the Gemini API quota was exceeded.',
+            classification: 'insufficient-evidence',
+            reviewNotes:
+              'Gemini returned a quota or rate-limit error, so no AI diagnosis was produced. Evidence artifacts were still collected for human review.',
+            truncations,
+          }),
+        );
+        return;
+      }
+
+      if (error instanceof SyntaxError) {
+        const rawPath = evidenceFile('gemini-raw-response.txt');
+        writeText(rawPath, rawResponse || error.message);
+        writeManifestAndReport(
+          fallbackManifest({
+            summary: 'AI maintenance analysis could not be completed because Gemini returned invalid JSON.',
+            reviewNotes: `Failed to parse Gemini JSON response. Raw response or parse detail was written to ${rawPath}. ${error.message}`,
+            truncations,
+          }),
+        );
+        return;
+      }
+
+      throw error;
+    }
+  }
+
+  const flakyFindings = flakyRecoveredTests.map(buildFlakyFinding);
+  const normalized = normalizeManifest(
+    {
+      ...parsed,
+      runContext: {
+        ...runContext({ truncationApplied: truncations.length > 0 }),
+        ...(parsed.runContext || {}),
+        truncationApplied: args.dryRun || truncations.length > 0 || Boolean(parsed.runContext?.truncationApplied),
+      },
+      findings: [...(parsed.findings || []), ...flakyFindings],
+      evidenceFiles: {
+        ...evidenceFiles(),
+        ...(parsed.evidenceFiles || {}),
+      },
+      reviewNotes: appendTruncationNotes(parsed.reviewNotes, truncations),
+    },
+    defaults({ runContext: { truncationApplied: truncations.length > 0 } }),
+  );
+
+  writeManifestAndReport(normalized);
 }
 
 main().catch((error) => {
   console.error(`[ai-maintenance] Unexpected failure: ${error.stack || error.message}`);
-  process.exit(1);
+  const manifest = fallbackManifest({
+    summary: 'AI maintenance analysis could not be completed due to an unexpected agent error.',
+    reviewNotes: error.stack || error.message,
+  });
+  writeManifestAndReport(manifest);
+  process.exit(0);
 });

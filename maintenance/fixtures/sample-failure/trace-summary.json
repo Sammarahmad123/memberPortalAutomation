@@ -1,0 +1,49 @@
+{
+  "schemaVersion": "3A-plus-trace-summary-v1",
+  "generatedAt": "2026-05-30T00:00:00.000Z",
+  "available": true,
+  "reason": null,
+  "traces": [
+    {
+      "traceFilePath": "test-results/sample-valid-login/trace.zip",
+      "available": true,
+      "traceEntry": "trace.trace",
+      "networkEntry": "trace.network",
+      "eventCount": 3,
+      "networkEventCount": 1,
+      "urlsVisited": [
+        "https://example.test/dashboard.html"
+      ],
+      "actionsAttempted": [
+        {
+          "apiName": "locator.fill",
+          "selector": "[data-testid=\"email-input\"]",
+          "url": "https://example.test/",
+          "error": null
+        },
+        {
+          "apiName": "expect.toHaveText",
+          "selector": "h1",
+          "url": "https://example.test/dashboard.html",
+          "error": "Expected heading text did not match"
+        }
+      ],
+      "selectorsUsed": [
+        "[data-testid=\"email-input\"]",
+        "h1"
+      ],
+      "failedAction": {
+        "apiName": "expect.toHaveText",
+        "selector": "h1",
+        "error": "Expected heading text did not match"
+      },
+      "networkErrors": [],
+      "snapshotReferences": [
+        "after-login-snapshot"
+      ],
+      "screenshotReferences": [
+        "test-failed-1.png"
+      ]
+    }
+  ]
+}

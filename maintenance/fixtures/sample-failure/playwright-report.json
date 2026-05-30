@@ -1,0 +1,80 @@
+{
+  "config": {
+    "rootDir": "."
+  },
+  "suites": [
+    {
+      "title": "tests",
+      "suites": [],
+      "specs": [
+        {
+          "title": "valid login reaches dashboard with correct member info",
+          "file": "tests/e2e.spec.js",
+          "line": 14,
+          "ok": false,
+          "tests": [
+            {
+              "projectName": "chromium",
+              "status": "unexpected",
+              "results": [
+                {
+                  "retry": 0,
+                  "status": "failed",
+                  "error": {
+                    "message": "Error: expect(locator).toHaveText(expected) failed\nExpected: \"Welcome, Sarah Chen\"\nReceived: \"Welcome back, Sarah Chen\""
+                  },
+                  "steps": [
+                    {
+                      "title": "Expect \"toHaveText\"",
+                      "category": "expect",
+                      "error": {
+                        "message": "Expected heading text did not match"
+                      }
+                    }
+                  ],
+                  "attachments": [
+                    {
+                      "name": "trace",
+                      "path": "test-results/sample-valid-login/trace.zip"
+                    },
+                    {
+                      "name": "screenshot",
+                      "path": "test-results/sample-valid-login/test-failed-1.png"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "title": "transaction history table shows rows with valid statuses",
+          "file": "tests/e2e.spec.js",
+          "line": 31,
+          "ok": true,
+          "tests": [
+            {
+              "projectName": "chromium",
+              "status": "expected",
+              "results": [
+                {
+                  "retry": 0,
+                  "status": "timedOut",
+                  "error": {
+                    "message": "Timeout waiting for transactions table"
+                  },
+                  "attachments": []
+                },
+                {
+                  "retry": 1,
+                  "status": "passed",
+                  "attachments": []
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

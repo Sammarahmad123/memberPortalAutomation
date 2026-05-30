@@ -1,0 +1,48 @@
+{
+  "schemaVersion": "3A-plus-failure-targets-v1",
+  "generatedAt": "2026-05-30T00:00:00.000Z",
+  "available": true,
+  "source": "playwright-json",
+  "playwrightJsonPath": "maintenance/evidence/playwright-report.json",
+  "failedTests": [
+    {
+      "id": "target-1",
+      "source": "playwright-json",
+      "testTitle": "tests > valid login reaches dashboard with correct member info",
+      "specFile": "tests/e2e.spec.js",
+      "line": 14,
+      "project": "chromium",
+      "retryAttempts": 1,
+      "finalStatus": "failed",
+      "failureType": "unknown",
+      "retryRecovered": false,
+      "errorMessage": "Error: expect(locator).toHaveText(expected) failed\nExpected: \"Welcome, Sarah Chen\"\nReceived: \"Welcome back, Sarah Chen\"",
+      "failedLocatorOrAction": "Expect \"toHaveText\"",
+      "expected": "\"Welcome, Sarah Chen\"",
+      "actual": "\"Welcome back, Sarah Chen\"",
+      "tracePath": "test-results/sample-valid-login/trace.zip",
+      "screenshotPath": "test-results/sample-valid-login/test-failed-1.png"
+    }
+  ],
+  "flakyRecoveredTests": [
+    {
+      "id": "target-2",
+      "source": "playwright-json",
+      "testTitle": "tests > transaction history table shows rows with valid statuses",
+      "specFile": "tests/e2e.spec.js",
+      "line": 31,
+      "project": "chromium",
+      "retryAttempts": 2,
+      "finalStatus": "passed",
+      "failureType": "flaky-retry-recovered",
+      "retryRecovered": true,
+      "errorMessage": "Timeout waiting for transactions table",
+      "failedLocatorOrAction": null,
+      "expected": null,
+      "actual": null,
+      "tracePath": null,
+      "screenshotPath": null
+    }
+  ],
+  "allTargets": []
+}
