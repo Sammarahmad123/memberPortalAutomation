@@ -1,0 +1,14 @@
+{
+  "name": "member-portal-automation",
+  "version": "1.0.0",
+  "description": "Playwright test suite for REST Super Member Portal",
+  "scripts": {
+    "test": "playwright test",
+    "test:headed": "playwright test --headed",
+    "test:ui": "playwright test --ui"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.48.0",
+    "http-server": "^14.1.1"
+  }
+}
