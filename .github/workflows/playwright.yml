@@ -1,6 +1,6 @@
 # Triggered by repository_dispatch from the app repo, manually, or by a PR.
-# PRs only validate the automation tests. Dispatch/manual runs may deploy the
-# Playwright report to this automation repo's GitHub Pages.
+# PRs validate tests and publish artifacts only. Dispatch/manual runs may deploy
+# the Playwright report to this automation repo's GitHub Pages.
 name: Playwright Tests
 
 on:
@@ -17,8 +17,8 @@ permissions:
   pages: write
   id-token: write
 
-# PRs:            cancel the old run for the same PR on each new push.
-# Pages deploys:  never cancel in-flight - a partial deploy leaves Pages broken.
+# PRs: cancel the old run for the same PR on each new push.
+# Pages deploys: never cancel in-flight - a partial deploy leaves Pages broken.
 concurrency:
   group: ${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || 'pages' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -33,10 +33,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
-    # Export the raw test outcome so deploy-report can re-raise dispatch/manual
-    # failures after reports and maintenance artifacts are safely published.
+    # Export the captured Playwright outcome so dispatch/manual runs can fail
+    # after the report has been deployed by deploy-report.
     outputs:
-      tests-outcome: ${{ steps.dispatch-tests.outputs.tests-outcome || steps.pr-tests.outcome }}
+      tests-outcome: ${{ steps.tests.outputs.tests-outcome }}
 
     steps:
       - name: Checkout
@@ -54,23 +54,13 @@ jobs:
       - name: Install Playwright browsers
         run: npx playwright install --with-deps
 
-      # PR runs are validation only. They do not run Gemini and do not deploy Pages.
-      - name: Run Playwright tests
-        id: pr-tests
-        if: github.event_name == 'pull_request'
-        run: npx playwright test
-        env:
-          BASE_URL: https://sammarahmad123.github.io/super-member-portal-demo/
-
-      # Dispatch/manual runs keep going after test failure so maintenance
-      # artifacts and the Playwright HTML report can be published first.
       - name: Prepare maintenance folders
-        if: github.event_name != 'pull_request'
         run: mkdir -p maintenance/evidence maintenance/manifests maintenance/reports
 
+      # Capture Playwright output for every trigger and delay failure so Gemini
+      # analysis and artifacts are produced before branch protection sees red.
       - name: Run Playwright tests and capture output
-        id: dispatch-tests
-        if: github.event_name != 'pull_request'
+        id: tests
         shell: bash
         run: |
           set +e
@@ -86,7 +76,7 @@ jobs:
           BASE_URL: ${{ github.event.client_payload.app_url || 'https://sammarahmad123.github.io/super-member-portal-demo/' }}
 
       - name: Run Gemini maintenance analysis
-        if: github.event_name != 'pull_request' && steps.dispatch-tests.outputs.tests-outcome == 'failure'
+        if: steps.tests.outputs.tests-outcome == 'failure'
         continue-on-error: true
         run: npm run ai:maintenance
         env:
@@ -94,7 +84,7 @@ jobs:
           BASE_URL: ${{ github.event.client_payload.app_url || 'https://sammarahmad123.github.io/super-member-portal-demo/' }}
 
       - name: Upload maintenance artifacts
-        if: always() && github.event_name != 'pull_request'
+        if: always() && steps.tests.outputs.tests-outcome == 'failure'
         uses: actions/upload-artifact@v4
         with:
           name: maintenance-analysis
@@ -104,9 +94,6 @@ jobs:
             maintenance/reports/
           retention-days: 14
 
-      # Always upload the report as a plain artifact.
-      # PR runs: directly downloadable from the run summary.
-      # Dispatch/manual: picked up by the deploy-report job below.
       - name: Upload playwright-report artifact
         if: always()
         uses: actions/upload-artifact@v4
@@ -114,6 +101,14 @@ jobs:
           name: playwright-report
           path: playwright-report/
           retention-days: 14
+
+      # PRs have no deploy job, so fail here after evidence and Gemini artifacts
+      # are uploaded. Dispatch/manual failures are re-raised after Pages deploy.
+      - name: Re-raise PR test failure
+        if: github.event_name == 'pull_request' && steps.tests.outputs.tests-outcome == 'failure'
+        run: |
+          echo "::error::Tests failed. Maintenance artifacts were uploaded."
+          exit 1
 
   # Job 2: deploy-report
   # Runs only for dispatch / manual, never for pull_request.
