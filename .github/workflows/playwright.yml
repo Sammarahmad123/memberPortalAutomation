@@ -1,10 +1,12 @@
+# Triggered by the application repo after a successful GitHub Pages deployment,
+# or manually from the Actions tab.
+# Publishes the Playwright HTML report to THIS repo's GitHub Pages only —
+# the application repo Pages site is never touched.
 name: Playwright Tests
 
 on:
-  # Triggered by the application repo after a successful deploy
   repository_dispatch:
     types: [app-updated]
-  # Also runnable manually from the Actions tab
   workflow_dispatch:
 
 # Required for GitHub Pages OIDC deployment
@@ -14,14 +16,14 @@ permissions:
   id-token: write
 
 # Only one Pages deployment at a time; don't cancel in-flight so a
-# partially-deployed report isn't left in a broken state.
+# partially-deployed report is never left in a broken state.
 concurrency:
   group: "pages"
   cancel-in-progress: false
 
 jobs:
   test:
-    name: Run tests and publish report
+    name: Run Playwright tests and publish report
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment:
@@ -58,17 +60,17 @@ jobs:
       - name: Setup Pages
         uses: actions/configure-pages@v4
 
-      - name: Upload report to Pages
+      - name: Upload Playwright report to Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
           path: playwright-report/
 
-      - name: Deploy to GitHub Pages
+      - name: Deploy report to automation repo GitHub Pages
         id: deploy
         uses: actions/deploy-pages@v4
 
       # Fail the job now that the report is safely published.
-      - name: Fail job if tests failed
+      - name: Re-raise test failure
         if: steps.tests.outcome == 'failure'
         run: |
           echo "::error::Tests failed — report published at ${{ steps.deploy.outputs.page_url }}"
