@@ -48,12 +48,49 @@ jobs:
 
       - run: npx playwright install --with-deps
 
+      # For pull_request runs: read the <!-- app-preview-url: ... --> comment
+      # embedded in the PR body by /apply-fixes. If present, tests run against
+      # that preview URL instead of the live main site.
+      # For dispatch/manual runs: use client_payload.app_url if provided.
+      # Falls back to the live main site in all other cases.
+      - name: Resolve BASE_URL
+        id: base-url
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          DEFAULT_URL="https://sammarahmad123.github.io/super-member-portal-demo/"
+
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            PREVIEW_URL=$(gh pr view ${{ github.event.pull_request.number }} \
+              --repo ${{ github.repository }} \
+              --json body -q '.body' \
+              | grep -o '<!-- app-preview-url: [^ ]* -->' \
+              | sed 's/<!-- app-preview-url: //;s/ -->//' \
+              | tr -d '[:space:]')
+            if [ -n "$PREVIEW_URL" ]; then
+              echo "url=$PREVIEW_URL" >> "$GITHUB_OUTPUT"
+              echo "Using app preview URL: $PREVIEW_URL"
+            else
+              echo "url=$DEFAULT_URL" >> "$GITHUB_OUTPUT"
+              echo "No app-preview-url comment found, using default: $DEFAULT_URL"
+            fi
+          else
+            DISPATCH_URL="${{ github.event.client_payload.app_url }}"
+            if [ -n "$DISPATCH_URL" ]; then
+              echo "url=$DISPATCH_URL" >> "$GITHUB_OUTPUT"
+              echo "Using dispatch app_url: $DISPATCH_URL"
+            else
+              echo "url=$DEFAULT_URL" >> "$GITHUB_OUTPUT"
+              echo "Using default URL: $DEFAULT_URL"
+            fi
+          fi
+
       - name: Run Playwright tests
         id: tests
         run: npx playwright test
         continue-on-error: ${{ github.event_name != 'pull_request' }}
         env:
-          BASE_URL: ${{ github.event.client_payload.app_url || 'https://sammarahmad123.github.io/super-member-portal-demo/' }}
+          BASE_URL: ${{ steps.base-url.outputs.url }}
 
       - name: Upload Playwright report
         if: always()
