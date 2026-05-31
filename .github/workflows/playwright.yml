@@ -1,6 +1,6 @@
 # Triggered by repository_dispatch from the app repo, manually, or by a PR.
-# Publishes the Playwright HTML report to THIS repo's GitHub Pages only —
-# the application repo Pages site is never touched.
+# PRs validate tests and publish artifacts only. Dispatch/manual runs may deploy
+# the Playwright report to this automation repo's GitHub Pages.
 name: Playwright Tests
 
 on:
@@ -17,53 +17,37 @@ permissions:
   pages: write
   id-token: write
 
-# PRs:            cancel the old run for the same PR on each new push.
-# Pages deploys:  never cancel in-flight — a partial deploy leaves Pages broken.
+# PRs: cancel the old run for the same PR on each new push.
+# Pages deploys: never cancel in-flight - a partial deploy leaves Pages broken.
 concurrency:
   group: ${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || 'pages' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  # ─── Job 1: test ────────────────────────────────────────────────────────────
+  # Job 1: test
   # Runs on every trigger.
-  # Intentionally has NO environment block — PR runs must never be treated as
-  # a deployment attempt and must never touch the github-pages environment.
+  # Intentionally has no environment block. PR runs must never be treated as
+  # deployment attempts and must never touch the github-pages environment.
   test:
     name: Run Playwright tests
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
-    # Export the raw test-step outcome so deploy-report can re-raise the failure
-    # after the report is safely published.
     outputs:
       tests-outcome: ${{ steps.tests.outcome }}
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up Node.js 20
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: '20'
           cache: 'npm'
 
-      - name: Install dependencies
-        run: npm ci
+      - run: npm ci
 
-      - name: Install Playwright browsers
-        run: npx playwright install --with-deps
+      - run: npx playwright install --with-deps
 
-      # BASE_URL: comes from the dispatch payload (app repo trigger) or falls
-      # back to the canonical GitHub Pages URL for manual / PR runs.
-      #
-      # continue-on-error behaviour:
-      #   pull_request  → false  Test failure immediately fails this job so the
-      #                          required status check blocks the PR merge.
-      #   dispatch/manual → true  Captures the exit code without failing the job,
-      #                           letting the artifact upload and deploy-report
-      #                           job still run. The workflow is re-failed after
-      #                           the report is published.
       - name: Run Playwright tests
         id: tests
         run: npx playwright test
@@ -71,12 +55,7 @@ jobs:
         env:
           BASE_URL: ${{ github.event.client_payload.app_url || 'https://sammarahmad123.github.io/super-member-portal-demo/' }}
 
-      # Always upload the report as a plain artifact.
-      # • PR runs:            directly downloadable from the run summary.
-      # • Dispatch/manual:    picked up by the deploy-report job below.
-      # always() is required so this step runs even when the test step just
-      # failed the job (PR with continue-on-error: false).
-      - name: Upload playwright-report artifact
+      - name: Upload Playwright report
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -84,14 +63,22 @@ jobs:
           path: playwright-report/
           retention-days: 14
 
-  # ─── Job 2: deploy-report ───────────────────────────────────────────────────
-  # Runs only for dispatch / manual — never for pull_request.
-  # This is the ONLY place that references the github-pages environment, so PR
+      - name: Upload traces on failure
+        if: always() && steps.tests.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-traces
+          path: test-results/
+          retention-days: 14
+
+  # Job 2: deploy-report
+  # Runs only for dispatch / manual, never for pull_request.
+  # This is the only place that references the github-pages environment, so PR
   # runs are completely isolated from it.
   deploy-report:
     name: Deploy report to GitHub Pages
     needs: test
-    if: github.event_name != 'pull_request'
+    if: always() && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment:
@@ -99,18 +86,14 @@ jobs:
       url: ${{ steps.deploy.outputs.page_url }}
 
     steps:
-      # Download the artifact that the test job uploaded.
-      - name: Download playwright-report artifact
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
           name: playwright-report
           path: playwright-report/
 
-      - name: Setup Pages
-        uses: actions/configure-pages@v4
+      - uses: actions/configure-pages@v4
 
-      - name: Upload report to Pages artifact
-        uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v3
         with:
           path: playwright-report/
 
@@ -118,11 +101,8 @@ jobs:
         id: deploy
         uses: actions/deploy-pages@v4
 
-      # Re-raise the test failure now that the report is safely published.
-      # Reads the outcome exported by the test job — 'failure' even when
-      # continue-on-error kept that job green.
       - name: Re-raise test failure
         if: needs.test.outputs.tests-outcome == 'failure'
         run: |
-          echo "::error::Tests failed — report published at ${{ steps.deploy.outputs.page_url }}"
+          echo "::error::Tests failed — Playwright report published at ${{ steps.deploy.outputs.page_url }}"
           exit 1
