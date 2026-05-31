@@ -1,7 +1,0 @@
-1) [chromium] tests/e2e.spec.js:14:1 valid login reaches dashboard with correct member info
-
-Error: expect(locator).toHaveText(expected) failed
-Expected: "Welcome, Sarah Chen"
-Received: "Welcome back, Sarah Chen"
-
-attachment #1: trace (application/zip) test-results/sample-valid-login/trace.zip

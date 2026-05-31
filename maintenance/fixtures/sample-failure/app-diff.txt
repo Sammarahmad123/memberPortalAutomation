@@ -1,4 +1,0 @@
-diff --git a/dashboard.html b/dashboard.html
-@@
--<h1>Welcome, Sarah Chen</h1>
-+<h1>Welcome back, Sarah Chen</h1>

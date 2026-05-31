@@ -5,19 +5,10 @@
   "scripts": {
     "test": "playwright test",
     "test:headed": "playwright test --headed",
-    "test:ui": "playwright test --ui",
-    "collect:failure-targets": "node agent/collect-failure-targets.mjs",
-    "collect:trace-summary": "node agent/collect-trace-summary.mjs",
-    "collect:code-context": "node agent/collect-code-context.mjs",
-    "collect:live-ui": "node agent/collect-live-ui-evidence.mjs",
-    "ai:maintenance": "node agent/ai-maintenance-agent.mjs",
-    "ai:maintenance:dry-run": "node agent/ai-maintenance-agent.mjs --dry-run --fixture maintenance/fixtures/sample-failure"
+    "test:ui": "playwright test --ui"
   },
   "devDependencies": {
     "@playwright/test": "^1.48.0",
     "http-server": "^14.1.1"
-  },
-  "dependencies": {
-    "@google/genai": "^2.7.0"
   }
 }

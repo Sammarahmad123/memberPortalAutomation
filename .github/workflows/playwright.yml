@@ -31,83 +31,31 @@ jobs:
   test:
     name: Run Playwright tests
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 15
 
-    # Export the captured Playwright outcome so dispatch/manual runs can fail
-    # after the report has been deployed by deploy-report.
     outputs:
-      tests-outcome: ${{ steps.tests.outputs.tests-outcome }}
+      tests-outcome: ${{ steps.tests.outcome }}
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up Node.js 20
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: '20'
           cache: 'npm'
 
-      - name: Install dependencies
-        run: npm ci
+      - run: npm ci
 
-      - name: Install Playwright browsers
-        run: npx playwright install --with-deps
+      - run: npx playwright install --with-deps
 
-      - name: Prepare maintenance folders
-        run: mkdir -p maintenance/evidence maintenance/manifests maintenance/reports
-
-      # Capture Playwright output for every trigger and delay failure so Gemini
-      # analysis and artifacts are produced before branch protection sees red.
-      - name: Run Playwright tests and capture output
+      - name: Run Playwright tests
         id: tests
-        shell: bash
-        run: |
-          set +e
-          PLAYWRIGHT_JSON_OUTPUT_NAME=maintenance/evidence/playwright-report.json \
-            npx playwright test --reporter=json,html,line 2>&1 | tee maintenance/evidence/playwright-output.txt
-          status=${PIPESTATUS[0]}
-          if [ "${status}" -eq 0 ]; then
-            echo "tests-outcome=success" >> "${GITHUB_OUTPUT}"
-          else
-            echo "tests-outcome=failure" >> "${GITHUB_OUTPUT}"
-          fi
-          exit 0
+        run: npx playwright test
+        continue-on-error: ${{ github.event_name != 'pull_request' }}
         env:
           BASE_URL: ${{ github.event.client_payload.app_url || 'https://sammarahmad123.github.io/super-member-portal-demo/' }}
 
-      - name: Collect structured maintenance evidence
-        if: always()
-        run: |
-          npm run collect:failure-targets
-          npm run collect:trace-summary
-          npm run collect:code-context
-          npm run collect:live-ui
-        env:
-          BASE_URL: ${{ github.event.client_payload.app_url || 'https://sammarahmad123.github.io/super-member-portal-demo/' }}
-
-      - name: Run AI maintenance analysis
-        if: always()
-        continue-on-error: true
-        run: npm run ai:maintenance
-        env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          GEMINI_MODEL: gemini-2.5-flash-lite
-          BASE_URL: ${{ github.event.client_payload.app_url || 'https://sammarahmad123.github.io/super-member-portal-demo/' }}
-          GITHUB_EVENT_NAME: ${{ github.event_name }}
-
-      - name: Upload maintenance artifacts
-        if: always() && steps.tests.outputs.tests-outcome == 'failure'
-        uses: actions/upload-artifact@v4
-        with:
-          name: maintenance-analysis
-          path: |
-            maintenance/evidence/
-            maintenance/manifests/
-            maintenance/reports/
-          retention-days: 14
-
-      - name: Upload playwright-report artifact
+      - name: Upload Playwright report
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -115,13 +63,13 @@ jobs:
           path: playwright-report/
           retention-days: 14
 
-      # PRs have no deploy job, so fail here after evidence and Gemini artifacts
-      # are uploaded. Dispatch/manual failures are re-raised after Pages deploy.
-      - name: Re-raise PR test failure
-        if: github.event_name == 'pull_request' && steps.tests.outputs.tests-outcome == 'failure'
-        run: |
-          echo "::error::Tests failed. Maintenance artifacts were uploaded."
-          exit 1
+      - name: Upload traces on failure
+        if: always() && steps.tests.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-traces
+          path: test-results/
+          retention-days: 14
 
   # Job 2: deploy-report
   # Runs only for dispatch / manual, never for pull_request.
@@ -138,17 +86,14 @@ jobs:
       url: ${{ steps.deploy.outputs.page_url }}
 
     steps:
-      - name: Download playwright-report artifact
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
           name: playwright-report
           path: playwright-report/
 
-      - name: Setup Pages
-        uses: actions/configure-pages@v4
+      - uses: actions/configure-pages@v4
 
-      - name: Upload report to Pages artifact
-        uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v3
         with:
           path: playwright-report/
 
@@ -156,10 +101,8 @@ jobs:
         id: deploy
         uses: actions/deploy-pages@v4
 
-      # Re-raise the test failure now that reports and maintenance artifacts
-      # have been published.
       - name: Re-raise test failure
         if: needs.test.outputs.tests-outcome == 'failure'
         run: |
-          echo "::error::Tests failed. Maintenance artifacts were uploaded and the Playwright report was published."
+          echo "::error::Tests failed — Playwright report published at ${{ steps.deploy.outputs.page_url }}"
           exit 1
