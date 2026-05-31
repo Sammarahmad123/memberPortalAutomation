@@ -1,65 +1,52 @@
 ---
-description: Apply fixes from a chosen triage plan, re-run tests, and open a PR if green
+description: Apply fixes from a chosen triage plan, re-run tests, and open a PR pinned to the app PR's preview URL
 ---
 
 # Apply Fixes
 
-You are the test maintenance agent. The user has reviewed a triage plan and wants you to apply specific fixes, re-run the tests, and open a PR for the test updates.
+You are the test maintenance agent. The user has reviewed a triage plan and wants you to apply specific fixes, re-run tests, and open a PR for the test updates. The PR must record which app PR's preview URL the tests should run against in CI.
 
 ## Step 1: Always ask which triage file to use
 
-Triage plans can have date or timestamp suffixes (for example `triage-plan-2026-05-30.md`, `triage-plan-2026-05-31-10-59.md`), so multiple may exist.
+Triage plans can have date or timestamp suffixes (for example `triage-plan-2026-05-30.md`), so multiple may exist.
 
-Do this every time, even if only one file exists:
+Every time:
+1. List all files in `maintenance/` matching `triage-plan-*.md`, newest first, with modification times.
+2. If $ARGUMENTS contains a valid path, confirm: "Use this triage plan: <path>? (yes/no)"
+3. If no argument given, ask: "Which triage plan? Reply with filename, number from the list, or a full path."
+4. If none exist, stop and tell the user to run `/triage-failures` first.
 
-1. List all files in `maintenance/` matching `triage-plan-*.md`.
-2. For each file, show:
-   - The filename
-   - The modification time (most recent first)
-3. If $ARGUMENTS already contains a valid file path, confirm: "Use this triage plan: <path>? (yes/no)"
-4. If no argument given, ask: "Which triage plan do you want me to apply? Reply with the filename, the number from the list, or a full path."
-5. If no triage plan files exist, stop and tell the user to run `/triage-failures` first.
-
-Never auto-pick. Always wait for the user's choice.
+Never auto-pick. Always wait.
 
 ## Step 2: Read the chosen plan
 
-Read the file. Confirm in chat: "Using triage plan: <path>"
+Read it. Confirm: "Using triage plan: <path>"
 
-## Step 3: Show me the proposed fixes
+## Step 3: Show the proposed fixes
 
 List every entry under "Proposed fixes" with a short ID (1, 2, 3...) and:
-- ID: <number>
-- Test: <test title>
-- File: <path>
-- Current: <current code>
-- Proposed: <new code>
-- Reason: <manifest entry that justifies it>
-
-Do NOT show the "Flagged for human review" or "Skipped" sections.
+- ID, Test, File, Current code, Proposed change, Reason.
+Do NOT show "Flagged for human review" or "Skipped".
 
 ## Step 4: Ask which fixes to apply
 
-Ask: "Which fixes do you want me to apply? Reply with numbers (e.g. `1, 3, 5`), `all`, or `none`."
+Ask: "Which fixes? Reply with numbers (e.g. `1, 3, 5`), `all`, or `none`."
 
 Wait. Do not assume.
 
-## Step 5: Confirm clean working tree before changing anything
+## Step 5: Check working tree
 
-Run `git status` first. If there are uncommitted changes that are NOT test files in the approved fix list, stop and ask the user:
-"Your working tree has unrelated uncommitted changes. Stash them or commit them before I continue. Continue anyway? (yes/no)"
+Run `git status`. If there are unrelated uncommitted changes, ask: "Working tree has unrelated changes. Continue? (yes/no)" and wait.
 
-Only proceed if the user says yes.
-
-## Step 6: Apply only the approved fixes
+## Step 6: Apply approved fixes
 
 For each approved fix:
 - Open the file from the plan.
-- Find the line that matches the "Current code" exactly.
-- Replace it with the "Proposed change" exactly.
+- Find the line matching the "Current code" exactly.
+- Replace with the "Proposed change" exactly.
 - Save.
 
-If the line cannot be found exactly, skip that fix, tell the user, and continue with the rest.
+If a line cannot be found, skip and report, continue with the rest.
 
 ## Step 7: Re-run the tests
 
@@ -67,64 +54,73 @@ Run:
 
     npm test
 
-Capture the output.
+Capture output.
 
-## Step 8: Decide whether to continue to PR
+## Step 8: Decide whether to open a PR
 
-- If any tests still fail, STOP. Report the failures (see Step 9) but DO NOT create a branch and DO NOT open a PR. Tell the user: "Tests still failing. Not opening a PR. Review failures below and decide next step."
-- If all tests pass AND at least one fix was applied, continue to Step 10.
-- If no fixes were applied (user said `none`, or every fix was skipped), STOP. Do not branch, commit, or PR.
+- If any test still fails: STOP. Report failures. Do NOT branch or open a PR.
+- If no fixes applied (user said `none`, or all skipped): STOP. Do not branch.
+- If all tests pass AND at least one fix applied: continue.
 
-## Step 9: Report the result
+## Step 9: Ask for the app PR's preview URL
 
-In chat:
-- Which triage plan you used
-- Which fixes were applied
-- Which fixes were skipped and why
-- How many tests passed
-- How many tests still fail
-- For each remaining failure, show the test name and a one-line error
+Ask the user:
+"What is the app PR's preview URL? This will be embedded in the test PR body so CI runs against the app PR, not the live main URL. Paste the URL, or reply `none` to use the default live URL."
 
-## Step 10: Create a branch, commit, push, open a PR
+The URL usually looks like:
+`https://sammarahmad123.github.io/super-member-portal-demo/pr-preview/pr-<N>/`
 
-Only reach this step if all tests pass and at least one fix was applied.
+Also ask (optional):
+"What is the app PR's URL on GitHub? (so reviewers can jump to it from the test PR). Paste it or `none`."
 
-1. Pick a branch name in this format: `chore/test-maintenance-<YYYY-MM-DD>`. If a branch with that name already exists locally or on origin, add a short timestamp suffix to make it unique (e.g. `chore/test-maintenance-2026-05-31-1430`).
-2. Create the branch from the current HEAD:
+Wait for both answers.
+
+## Step 10: Branch, commit, push, open PR
+
+1. Pick branch name: `chore/test-maintenance-<YYYY-MM-DD>`. If it already exists, add a short time suffix like `-1430`.
+2. Create the branch:
 
        git checkout -b <branch>
 
-3. Stage only the test files that were modified by the approved fixes:
+3. Stage only the test files modified by the approved fixes.
+4. Commit:
 
-       git add <each modified file>
-
-4. Commit with this message:
-
-       chore(tests): apply test maintenance fixes from <triage plan filename>
+       git commit -m "chore(tests): apply test maintenance fixes from <triage plan filename>"
 
 5. Push:
 
        git push -u origin <branch>
 
-6. Build the PR body. Write it to a temp file using a heredoc so there are no quoting traps:
+6. Write the PR body to a temp file. Include the preview URL as a hidden HTML comment so the CI workflow can parse it. Use a heredoc:
 
        cat > /tmp/apply-fixes-pr-body.md <<'EOF'
+       <!-- app-preview-url: __APP_PREVIEW_URL__ -->
+       <!-- app-pr-url: __APP_PR_URL__ -->
+
        This PR updates tests to match the latest app changes.
 
        Source:
        - Triage plan: maintenance/<triage plan filename>
        - Applied fix IDs: <list>
+       - App PR: __APP_PR_URL__
+       - App PR preview URL (CI target): __APP_PREVIEW_URL__
 
        Verification:
-       - npm test was run after applying the fixes
-       - All tests pass locally on this branch
+       - npm test was run locally after applying the fixes — all tests passed.
 
        Reviewer notes:
-       - Each change matches an entry in the manifest the app team produced
-       - No assertions were loosened. Selectors and labels were only updated where the app surface changed
+       - Each change matches an entry in the manifest the app team produced.
+       - No assertions were loosened. Selectors and labels were only updated where the app surface changed.
+       - CI on this PR runs against the app PR's preview URL (parsed from the hidden comment above). If the comment is missing, CI falls back to the live main URL.
        EOF
 
-7. Open the PR using gh:
+   Then replace the placeholders in that file:
+   - `__APP_PREVIEW_URL__` → the preview URL the user gave (or empty string if `none`).
+   - `__APP_PR_URL__` → the app PR URL (or empty string if `none`).
+
+   Use sed or read/write the file in your script.
+
+7. Open the PR:
 
        gh pr create \
          --base main \
@@ -138,8 +134,8 @@ Only reach this step if all tests pass and at least one fix was applied.
 
 - Always ask which triage plan to use. Never auto-pick.
 - Only touch test files named in the approved fixes.
-- Do NOT modify the manifest, the triage plan, or any source file in the app repo.
-- Do NOT open a PR if any test is failing after the fixes.
-- Never loosen an assertion just to make a test pass.
-- If the user replies "none" at step 4, stop and do not change anything.
-- The branch name pattern is `chore/test-maintenance-<YYYY-MM-DD>`. Test repo maintenance is "chore", not "feat" or "fix".
+- Never modify the manifest, the triage plan, or any source file in the app repo.
+- Never open a PR if any test is failing.
+- Never loosen an assertion to make a test pass.
+- The hidden HTML comments `<!-- app-preview-url: ... -->` and `<!-- app-pr-url: ... -->` in the PR body MUST appear exactly in that format — the CI workflow parses them.
+- If the user replies `none` for the preview URL, still include the comment but with an empty value, so CI knows to use the default.
