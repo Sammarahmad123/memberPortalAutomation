@@ -8,7 +8,7 @@ baseTest('invalid login shows error and does not redirect', async ({ page }) => 
   await page.getByTestId('password-input').fill('wrongpassword');
   await page.getByTestId('login-btn').click();
   await expect(page.getByTestId('login-error')).toBeVisible();
-  await expect(page.getByTestId('login-error')).toHaveText('Invalid email or password. Please try again.');
+  await expect(page.getByTestId('login-error')).toHaveText('Incorrect credentials. Please try again.');
   await expect(page).not.toHaveURL(/dashboard\.html/);
 });
 
