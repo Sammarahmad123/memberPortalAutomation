@@ -26,7 +26,7 @@ test('contribution form submits and shows success message', async ({ loggedInPag
   // Leave contribution type (Concessional) and payment method (Bank Transfer) at defaults
   await loggedInPage.getByTestId('submit-btn').click();
   await expect(loggedInPage.locator('#contribution-success')).toBeVisible();
-  await expect(loggedInPage.getByTestId('success-headline')).toHaveText('Your contribution has been submitted successfully.');
+  await expect(loggedInPage.getByTestId('success-headline')).toHaveText('Contribution submitted successfully.');
   await expect(loggedInPage.getByTestId('success-amount')).toHaveText('$500.00');
   await expect(loggedInPage.getByTestId('success-type')).toHaveText('Concessional');
   await expect(loggedInPage.getByTestId('success-method')).toHaveText('Bank Transfer');
