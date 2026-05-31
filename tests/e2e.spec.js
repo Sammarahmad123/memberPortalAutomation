@@ -21,9 +21,9 @@ test('valid login reaches dashboard with correct member info', async ({ loggedIn
 
 // 3. Contribution form accepts an amount and confirms submission
 test('contribution form submits and shows success message', async ({ loggedInPage }) => {
-  await loggedInPage.goto('contribution.html');
+  await loggedInPage.goto('contribute.html');
   await loggedInPage.getByTestId('contribution-amount').fill('500');
-  await loggedInPage.getByTestId('submit-contribution-btn').click();
+  await loggedInPage.getByTestId('submit-btn').click();
   await expect(loggedInPage.locator('#contribution-success')).toBeVisible();
 });
 
@@ -33,7 +33,7 @@ test('transaction history table shows rows with valid statuses', async ({ logged
   await expect(loggedInPage.getByTestId('transactions-table')).toBeVisible();
   const rows = loggedInPage.getByTestId('transactions-table').locator('tbody tr');
   expect(await rows.count()).toBeGreaterThanOrEqual(6);
-  const valid = new Set(['Pending', 'Completed', 'Failed']);
+  const valid = new Set(['Processing', 'Completed', 'Failed']);
   for (const text of await loggedInPage.getByTestId('transaction-status').allTextContents()) {
     expect(valid.has(text.trim())).toBe(true);
   }
@@ -44,6 +44,6 @@ test('member details shows correct data and saves successfully', async ({ logged
   await loggedInPage.goto('member-details.html');
   await expect(loggedInPage.getByTestId('member-name-input')).toHaveValue('Sarah Chen');
   await expect(loggedInPage.getByTestId('member-email-input')).toHaveValue('sarah.chen@restsuper.com.au');
-  await loggedInPage.getByTestId('save-member-btn').click();
+  await loggedInPage.getByTestId('save-btn').click();
   await expect(loggedInPage.locator('#member-details-success')).toBeVisible();
 });
