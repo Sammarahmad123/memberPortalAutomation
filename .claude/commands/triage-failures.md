@@ -11,7 +11,23 @@ Arguments (optional): $ARGUMENTS
 - If a GitHub repo slug is given (like `Sammarahmad123/super-member-portal-demo`), fetch the manifest from that repo.
 - If nothing is given, try the steps below in order.
 
-## Step 0: Find the manifest
+## Step 0: Ask for the target URL
+
+**Before doing anything else**, ask the user:
+
+> "Which URL should I run the tests against?
+> - Press Enter to use the default (`BASE_URL` from `playwright.config.js` — the main deployed site)
+> - Or paste a PR preview URL (e.g. `https://sammarahmad123.github.io/super-member-portal-demo/pr-preview/pr-6/`)"
+
+Wait for their answer. Record the URL they provide (or note "default" if they skip).
+
+When running `npm test` in Step 2, if they gave a custom URL, prefix the command:
+
+    BASE_URL="<their URL>" npm test
+
+If they chose the default, run `npm test` as-is.
+
+## Step 1: Find the manifest
 
 Try these in order until you find the manifest:
 
@@ -26,52 +42,55 @@ Try these in order until you find the manifest:
 
 Record the path or URL you ended up using. You will print it in the plan.
 
-## Step 1: Read the manifest
+## Step 2: Read the manifest
 
 Read it fully so you know what the app team changed.
 
-## Step 2: Run the tests locally
+## Step 3: Run the tests locally
 
 Run:
 
     npm test
 
-Wait for the run to finish. Capture the output. The tests run against the live deployed app (set in `playwright.config.js` as `BASE_URL`).
+(Or `BASE_URL="<url>" npm test` if the user provided a custom URL in Step 0.)
+
+Wait for the run to finish. Capture the output.
 
 If `npm install` has not been run yet, run it first. If Playwright browsers are missing, run `npx playwright install chromium`.
 
-## Step 3: Read the results
+## Step 4: Read the results
 
 - The console output you just captured
 - Anything in `test-results/`
 - The Playwright HTML report under `playwright-report/` if present
 - The failing test files themselves
 
-## Step 4: Skip flakes
+## Step 5: Skip flakes
 
 If a test passed on retry, skip it. Mark it in the plan as "skipped — retry-recovered."
 
-## Step 5: Open the live app with Playwright MCP
+## Step 6: Open the live app with Playwright MCP
 
 For each failing test that is not a flake:
-- Open the page the test was visiting.
+- Open the page the test was visiting (use the same URL from Step 0).
 - Look for the element the test wanted.
 - Compare what you see to the manifest.
 
-## Step 6: Classify each failure
+## Step 7: Classify each failure
 
 One of:
 - **Explained by manifest** — manifest mentions a matching change. Safe to propose a test update.
 - **Not in manifest but visible in app** — app shows a change the manifest does not list. Flag for human.
 - **Not visible in app** — test fails but app looks fine. Possible flake, timing, or real bug. Flag for human.
 
-## Step 7: Write the triage plan
+## Step 8: Write the triage plan
 
 Save to `maintenance/triage-plan-<today>.md` using this format:
 
 # Triage Plan
 
 **Date:** <today>
+**Target URL:** <URL used for npm test — default or custom>
 **Manifest source:** <path or URL used>
 **Tests run:** <n>
 **Tests failed:** <n>
@@ -105,7 +124,7 @@ One short paragraph.
 
 - <test name>: retry-recovered (likely flake)
 
-## Step 8: Show summary in chat
+## Step 9: Show summary in chat
 
 5-8 lines:
 - Manifest source used
@@ -117,7 +136,8 @@ One short paragraph.
 
 ## Rules
 
-- Always run `npm test` first. Do not assume past results are still accurate.
+- Always ask for the target URL (Step 0) before running anything. Never assume the default is correct — the change may only be on a PR preview.
+- Always run `npm test` (or `BASE_URL=... npm test`) first. Do not assume past results are still accurate.
 - DO NOT edit any test file in this step. Only write the plan.
 - Verify every proposed fix by opening the live app via Playwright MCP. If MCP is unavailable, say so and lower confidence.
 - Never loosen assertions just to make a test pass. Only update an assertion if the manifest confirms the change.
