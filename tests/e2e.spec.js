@@ -38,7 +38,7 @@ test('transaction history table shows rows with valid statuses', async ({ logged
   await expect(loggedInPage.getByTestId('transactions-table')).toBeVisible();
   const rows = loggedInPage.getByTestId('transactions-table').locator('tbody tr');
   expect(await rows.count()).toBeGreaterThanOrEqual(6);
-  const valid = new Set(['Processing', 'Completed', 'Failed']);
+  const valid = new Set(['Pending', 'Completed', 'Failed']);
   for (const text of await loggedInPage.getByTestId('transaction-status').allTextContents()) {
     expect(valid.has(text.trim())).toBe(true);
   }
