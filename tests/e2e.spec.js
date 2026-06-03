@@ -57,13 +57,13 @@ test('member details shows correct data and saves successfully', async ({ logged
 test('concessional cap shows error over limit and after-tax bypasses cap', async ({ loggedInPage }) => {
   await loggedInPage.goto('contribute.html');
 
-  // Concessional + $50,000 → cap error shown, success hidden
-  await loggedInPage.getByTestId('contribution-amount').fill('50000');
+  // Concessional + $27,501 (one dollar over cap) → cap error shown, success hidden
+  await loggedInPage.getByTestId('contribution-amount').fill('27501');
   await loggedInPage.getByTestId('submit-btn').click();
   await expect(loggedInPage.getByTestId('cap-error')).toBeVisible();
   await expect(loggedInPage.locator('#contribution-success')).not.toBeVisible();
 
-  // Switch to After Tax (same $50,000 amount) → success shown, cap error gone
+  // Switch to After Tax (same $27,501 amount) → success shown, cap error gone
   await loggedInPage.getByTestId('contribution-type-select').selectOption('after-tax');
   await loggedInPage.getByTestId('submit-btn').click();
   await expect(loggedInPage.getByTestId('cap-error')).not.toBeVisible();
