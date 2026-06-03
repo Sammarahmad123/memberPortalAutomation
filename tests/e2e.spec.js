@@ -49,6 +49,7 @@ test('member details shows correct data and saves successfully', async ({ logged
   await loggedInPage.goto('member-details.html');
   await expect(loggedInPage.getByTestId('member-name-input')).toHaveValue('Sarah Chen');
   await expect(loggedInPage.getByTestId('member-email-input')).toHaveValue('sarah.chen@restsuper.com.au');
+  await loggedInPage.getByTestId('phone-input').fill('0400000000');
   await loggedInPage.getByTestId('save-btn').click();
   await expect(loggedInPage.locator('#member-details-success')).toBeVisible();
 });
@@ -58,7 +59,7 @@ test('concessional cap shows error over limit and after-tax bypasses cap', async
   await loggedInPage.goto('contribute.html');
 
   // Concessional + $27,501 (one dollar over cap) → cap error shown, success hidden
-  await loggedInPage.getByTestId('contribution-amount').fill('28001');
+  await loggedInPage.getByTestId('contribution-amount').fill('28501');
   await loggedInPage.getByTestId('submit-btn').click();
   await expect(loggedInPage.getByTestId('cap-error')).toBeVisible();
   await expect(loggedInPage.locator('#contribution-success')).not.toBeVisible();
