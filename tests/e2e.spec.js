@@ -52,3 +52,20 @@ test('member details shows correct data and saves successfully', async ({ logged
   await loggedInPage.getByTestId('save-btn').click();
   await expect(loggedInPage.locator('#member-details-success')).toBeVisible();
 });
+
+// 6. Concessional cap blocks amounts over $27,500; After Tax is exempt
+test('concessional cap shows error over limit and after-tax bypasses cap', async ({ loggedInPage }) => {
+  await loggedInPage.goto('contribute.html');
+
+  // Concessional + $50,000 → cap error shown, success hidden
+  await loggedInPage.getByTestId('contribution-amount').fill('50000');
+  await loggedInPage.getByTestId('submit-btn').click();
+  await expect(loggedInPage.getByTestId('cap-error')).toBeVisible();
+  await expect(loggedInPage.locator('#contribution-success')).not.toBeVisible();
+
+  // Switch to After Tax (same $50,000 amount) → success shown, cap error gone
+  await loggedInPage.getByTestId('contribution-type-select').selectOption('after-tax');
+  await loggedInPage.getByTestId('submit-btn').click();
+  await expect(loggedInPage.getByTestId('cap-error')).not.toBeVisible();
+  await expect(loggedInPage.locator('#contribution-success')).toBeVisible();
+});
