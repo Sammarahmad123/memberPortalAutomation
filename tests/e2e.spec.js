@@ -58,7 +58,7 @@ test('concessional cap shows error over limit and after-tax bypasses cap', async
   await loggedInPage.goto('contribute.html');
 
   // Concessional + $27,501 (one dollar over cap) → cap error shown, success hidden
-  await loggedInPage.getByTestId('contribution-amount').fill('27501');
+  await loggedInPage.getByTestId('contribution-amount').fill('28001');
   await loggedInPage.getByTestId('submit-btn').click();
   await expect(loggedInPage.getByTestId('cap-error')).toBeVisible();
   await expect(loggedInPage.locator('#contribution-success')).not.toBeVisible();
